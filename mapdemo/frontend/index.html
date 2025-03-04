@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Montgomery, AL Map with Sports and Music Tags</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v7.3.0/ol.css">
+    <style>
+        #map {
+            width: 100%;
+            height: 500px;
+            cursor: crosshair;
+        }
+        #controls {
+            margin: 10px 0;
+        }
+        body {
+            font-family: Arial, sans-serif;
+        }
+        #layerControls {
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <input type="text" id="tagName" placeholder="Enter tag name then click on map">
+        <select id="layerSelect">
+            <option value="sports">Sports</option>
+            <option value="music">Music</option>
+        </select>
+        <button onclick="clearTags()">Clear All Tags</button>
+        <span id="status"></span>
+    </div>
+    <div id="layerControls">
+        <label><input type="checkbox" id="sportsCheck" checked> Sports</label>
+        <label><input type="checkbox" id="musicCheck" checked> Music</label>
+        <label><input type="checkbox" id="showAllCheck" checked> Show All</label>
+    </div>
+    <div id="map"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/ol@v7.3.0/dist/ol.js"></script>
+    <script>
+        // Initialize the map centered on Montgomery, AL
+        const map = new ol.Map({
+            target: 'map',
+            layers: [
+                new ol.layer.Tile({
+                    source: new ol.source.OSM()
+                })
+            ],
+            view: new ol.View({
+                center: ol.proj.fromLonLat([-86.2990, 32.3668]), // Montgomery, AL coordinates
+                zoom: 12 // Zoomed in to city level
+            })
+        });
+
+        // Create vector layers for tags
+        const vectorSources = {
+            sports: new ol.source.Vector(),
+            music: new ol.source.Vector()
+        };
+
+        const vectorLayers = {
+            sports: new ol.layer.Vector({
+                source: vectorSources.sports,
+                style: new ol.style.Style({
+                    image: new ol.style.Circle({
+                        radius: 6,
+                        fill: new ol.style.Fill({ color: 'red' }),
+                        stroke: new ol.style.Stroke({ color: 'white', width: 2 })
+                    })
+                })
+            }),
+            music: new ol.layer.Vector({
+                source: vectorSources.music,
+                style: new ol.style.Style({
+                    image: new ol.style.Circle({
+                        radius: 6,
+                        fill: new ol.style.Fill({ color: 'blue' }),
+                        stroke: new ol.style.Stroke({ color: 'white', width: 2 })
+                    })
+                })
+            })
+        };
+
+        map.addLayer(vectorLayers.sports);
+        map.addLayer(vectorLayers.music);
+
+        // Store overlays for each layer
+        const layerOverlays = {
+            sports: [],
+            music: []
+        };
+
+        // Load existing tags from localStorage
+        function loadTags() {
+            const tags = JSON.parse(localStorage.getItem('mapTags') || '{}');
+            for (const layer in tags) {
+                if (vectorSources[layer]) {
+                    tags[layer].forEach(tag => addTagToMap(tag.name, tag.lon, tag.lat, layer));
+                }
+            }
+        }
+
+        // Add tag to map
+        function addTagToMap(name, lon, lat, layer) {
+            const feature = new ol.Feature({
+                geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat])),
+                name: name,
+                layer: layer
+            });
+            vectorSources[layer].addFeature(feature);
+
+            const element = document.createElement('div');
+            element.className = 'ol-tooltip';
+            element.innerHTML = name;
+            
+            const overlay = new ol.Overlay({
+                element: element,
+                positioning: 'bottom-center',
+                offset: [0, -15],
+                position: ol.proj.fromLonLat([lon, lat])
+            });
+            map.addOverlay(overlay);
+            layerOverlays[layer].push(overlay);
+        }
+
+        // Save tags to localStorage
+        function saveTags() {
+            const tags = {};
+            for (const layer in vectorSources) {
+                tags[layer] = vectorSources[layer].getFeatures().map(feature => {
+                    const coords = ol.proj.toLonLat(feature.getGeometry().getCoordinates());
+                    return {
+                        name: feature.get('name'),
+                        lon: coords[0],
+                        lat: coords[1]
+                    };
+                });
+            }
+            localStorage.setItem('mapTags', JSON.stringify(tags));
+        }
+
+        // Clear all tags
+        function clearTags() {
+            if (confirm('Are you sure you want to clear all tags?')) {
+                for (const layer in vectorSources) {
+                    vectorSources[layer].clear();
+                    layerOverlays[layer].forEach(overlay => map.removeOverlay(overlay));
+                    layerOverlays[layer] = [];
+                }
+            }
+            localStorage.removeItem('mapTags');
+        }
+
+        // Handle layer visibility
+        const sportsCheck = document.getElementById('sportsCheck');
+        const musicCheck = document.getElementById('musicCheck');
+        const showAllCheck = document.getElementById('showAllCheck');
+
+        sportsCheck.addEventListener('change', updateLayerVisibility);
+        musicCheck.addEventListener('change', updateLayerVisibility);
+        showAllCheck.addEventListener('change', function() {
+            if (this.checked) {
+                sportsCheck.checked = true;
+                musicCheck.checked = true;
+            }
+            updateLayerVisibility();
+        });
+
+        function updateLayerVisibility() {
+            vectorLayers.sports.setVisible(sportsCheck.checked);
+            vectorLayers.music.setVisible(musicCheck.checked);
+            
+            layerOverlays.sports.forEach(overlay => {
+                overlay.getElement().style.display = sportsCheck.checked ? 'block' : 'none';
+            });
+            layerOverlays.music.forEach(overlay => {
+                overlay.getElement().style.display = musicCheck.checked ? 'block' : 'none';
+            });
+            
+            showAllCheck.checked = sportsCheck.checked && musicCheck.checked;
+        }
+
+        // Handle map clicks to add tags
+        let addingTag = false;
+        const tagNameInput = document.getElementById('tagName');
+        const layerSelect = document.getElementById('layerSelect');
+        const statusSpan = document.getElementById('status');
+
+        tagNameInput.addEventListener('input', function() {
+            if (this.value.trim()) {
+                addingTag = true;
+                statusSpan.textContent = `Click on map to place tag on ${layerSelect.value}`;
+                map.getTargetElement().style.cursor = 'crosshair';
+            } else {
+                addingTag = false;
+                statusSpan.textContent = '';
+                map.getTargetElement().style.cursor = 'default';
+            }
+        });
+
+        map.on('singleclick', function(evt) {
+            if (addingTag) {
+                const coords = ol.proj.toLonLat(evt.coordinate);
+                const name = tagNameInput.value.trim();
+                const layer = layerSelect.value;
+                
+                addTagToMap(name, coords[0], coords[1], layer);
+                saveTags();
+                
+                tagNameInput.value = '';
+                addingTag = false;
+                statusSpan.textContent = 'Tag added! Enter new tag name to add another';
+                setTimeout(() => statusSpan.textContent = '', 2000);
+                map.getTargetElement().style.cursor = 'default';
+                updateLayerVisibility();
+            }
+        });
+
+        // Add click handler to show tag info
+        map.on('click', function(evt) {
+            if (!addingTag) {
+                const feature = map.forEachFeatureAtPixel(evt.pixel,
+                    function(feature) {
+                        return feature;
+                    });
+                if (feature && vectorLayers[feature.get('layer')].getVisible()) {
+                    alert(`Tag: ${feature.get('name')} (Layer: ${feature.get('layer')})`);
+                }
+            }
+        });
+
+        // Add hover effect
+        const tooltip = document.createElement('div');
+        tooltip.className = 'ol-tooltip';
+        const hoverOverlay = new ol.Overlay({
+            element: tooltip,
+            offset: [10, 0],
+            positioning: 'center-left'
+        });
+        map.addOverlay(hoverOverlay);
+
+        map.on('pointermove', function(evt) {
+            const feature = map.forEachFeatureAtPixel(evt.pixel,
+                function(feature) {
+                    return feature;
+                });
+            if (feature && vectorLayers[feature.get('layer')].getVisible()) {
+                const coordinate = evt.coordinate;
+                tooltip.innerHTML = `${feature.get('name')} (${feature.get('layer')})`;
+                hoverOverlay.setPosition(coordinate);
+                tooltip.style.display = 'block';
+            } else {
+                tooltip.style.display = 'none';
+            }
+        });
+
+        // Load tags when page loads
+        loadTags();
+        updateLayerVisibility();
+
+        // Additional CSS for tooltips
+        const style = document.createElement('style');
+        style.textContent = `
+            .ol-tooltip {
+                background: rgba(0, 0, 0, 0.8);
+                color: white;
+                padding: 4px 8px;
+                border-radius: 4px;
+                white-space: nowrap;
+                font-size: 12px;
+                pointer-events: none;
+                position: absolute;
+            }
+            #status {
+                margin-left: 10px;
+                color: #666;
+            }
+            #layerControls label {
+                margin-right: 15px;
+            }
+        `;
+        document.head.appendChild(style);
+    </script>
+</body>
+</html>

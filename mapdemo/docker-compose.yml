@@ -1,0 +1,21 @@
+version: "3.8"
+
+services:
+  backend:
+    image: encoredemo:latest  # Replace with your image and tag
+    ports:
+      - "8081:8081"
+    environment:
+      PORT: 8081 
+    # No build context needed as we're using a pre-built image
+    # volumes:
+    #   - .:/app # Remove volume if not needed in production
+    # command: encore run # remove command if already in image
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
