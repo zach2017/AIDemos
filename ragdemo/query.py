@@ -2,12 +2,12 @@
 import argparse
 from pathlib import Path
 from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 
 try:
-    from langchain_community.llms import Ollama
-except Exception:
-    Ollama = None
+    from langchain_ollama import OllamaLLM
+except ImportError:
+    OllamaLLM = None
 
 def main():
     ap = argparse.ArgumentParser()
@@ -18,7 +18,7 @@ def main():
     ap.add_argument("--ollama", default=None, help="Model name to use via Ollama (optional)")
     args = ap.parse_args()
 
-    if args.ollama and Ollama is None:
+    if args.ollama and OllamaLLM is None:
         print("[WARN] Ollama not available; retrieval only.")
 
     persist_dir = Path(args.persist)
@@ -43,9 +43,9 @@ def main():
         preview = d.page_content[:280].replace("\n", " ")
         print(f"[{i}] Source: {src}\n    {preview}...\n")
 
-    if args.ollama and Ollama is not None:
+    if args.ollama and OllamaLLM is not None:
         print(f"[INFO] Asking local LLM via Ollama: {args.ollama}")
-        llm = Ollama(model=args.ollama)
+        llm = OllamaLLM(model=args.ollama)
         context = "\n\n".join([f"Source: {d.metadata.get('source','unknown')}\n{d.page_content}" for d in docs])
         prompt = (
             "You are a helpful assistant. Using only the CONTEXT below, answer the QUESTION clearly.\n\n"

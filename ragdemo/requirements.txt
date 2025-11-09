@@ -2,5 +2,6 @@ langchain
 langchain_huggingface
 langchain-text-splitters
 langchain_chroma
+langchain-ollama
 sentence-transformers
 ollama
