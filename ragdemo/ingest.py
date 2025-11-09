@@ -6,8 +6,8 @@ Build embeddings from a list of text files and store them in a local Chroma DB.
 import argparse
 import shutil
 from pathlib import Path
-from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_chroma import Chroma
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document  # ✅ FIXED import
 
@@ -63,7 +63,7 @@ def main():
             embedding_function=embeddings,
         )
         vectordb.add_documents(chunks)
-        vectordb.persist()
+       
     else:
         print("[INFO] Creating new DB…")
         Chroma.from_documents(
