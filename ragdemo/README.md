@@ -288,6 +288,30 @@ python ingest.py --persist ./chroma_db --collection demo --files docs/policy.txt
 # 5a) Retrieve similar chunks
 python query.py --persist ./chroma_db --collection demo --query "How long do refunds take?"
 
+```
+python query.py --persist ./chroma_db --collection demo --query "How long do refunds take?"  --ollama tinyllama
+[INFO] Loading Chroma DB…
+[INFO] Searching top-4 for: 'How long do refunds take?'
+
+=== Top Matches ===
+[1] Source: C:\Users\zcstr\AIDemos\ragdemo\docs\policy.txt
+    "Welcome to the demo. The policy is Refunds are processed within 7 days."...
+
+[2] Source: C:\Users\zcstr\AIDemos\ragdemo\docs\policy.txt
+    "Welcome to the demo.\nRefunds are processed within 7 days."...
+
+[3] Source: C:\Users\zcstr\AIDemos\ragdemo\docs\policy.txt
+    "Welcome to the demo.\nRefunds are processed within 7 days."...
+
+[4] Source: C:\Users\zcstr\AIDemos\ragdemo\docs\notes.txt
+    "Meeting notes: prioritize onboarding and docs.\n"...
+
+[INFO] Asking local LLM via Ollama: tinyllama
+
+=== Answer ===
+As per the CONTEXT provided, refunds take approximately 7 days to process in this AI demo.
+```
+
 # 5b) (Optional) Ask a local LLM via Ollama (if you have a model pulled)
 # ollama pull llama3    # run once
 python query.py --persist ./chroma_db --collection demo --query "Summarize the policy" --ollama llama3
