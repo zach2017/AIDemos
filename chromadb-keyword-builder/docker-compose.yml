@@ -1,3 +1,4 @@
+version: "3.9"
 
 services:
   chromadb:
@@ -11,13 +12,6 @@ services:
       - CHROMA_SERVER_HTTP_PORT=8000
     volumes:
       - chroma_data:/chroma/.chroma/index
-    deploy:
-      resources:
-        reservations:
-          cpus: "0.5"
-        limits:
-          cpus: "1.0"
-          memory: 1G
 
   ollama:
     image: ollama/ollama:latest
@@ -30,13 +24,8 @@ services:
     environment:
       - OLLAMA_KEEP_ALIVE=300
       - OLLAMA_MODELS_DIR=/root/.ollama
-      - OLLAMA_NO_GPU=true       # ✅ Forces Ollama to run on CPU
+      - OLLAMA_NO_GPU=true
     command: serve
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 2G
 
   keyword-app:
     build: ./app
@@ -53,6 +42,7 @@ services:
       - OLLAMA_HOST=ollama
       - OLLAMA_PORT=11434
       - COLLECTION_NAME=keywords
+      - EMBEDDING_BACKEND=${EMBEDDING_BACKEND}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL}
       - LOAD_ON_STARTUP=true
       - TOP_K=10
@@ -60,11 +50,6 @@ services:
       - "8501:8501"
     volumes:
       - ./app/data:/app/data:ro
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 2G
 
 volumes:
   chroma_data:

@@ -1,0 +1,4 @@
+[
+  { "id": "k1", "term": "geospatial analysis", "synonyms": ["GIS", "spatial analytics"], "category": "data" },
+  { "id": "k2", "term": "logistics management", "synonyms": ["supply chain", "routing optimization"], "category": "operations" }
+]
