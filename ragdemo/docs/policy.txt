@@ -1,1 +1,1 @@
-"Welcome to the demo.\nRefunds are processed within 7 days." 
+"Welcome to the demo. The policy is Refunds are processed within 7 days." 

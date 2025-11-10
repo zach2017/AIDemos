@@ -71,7 +71,7 @@ def main():
             embedding=embeddings,
             persist_directory=str(persist_dir),
             collection_name=args.collection,
-        ).persist()
+        )
 
     print(f"[DONE] Chroma DB ready at: {persist_dir} (collection: {args.collection})")
 
