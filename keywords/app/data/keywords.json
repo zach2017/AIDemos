@@ -1,0 +1,12 @@
+[
+  { "id": "k1", "term": "geospatial analysis", "synonyms": ["GIS", "spatial analytics"], "category": "data" },
+  { "id": "k2", "term": "logistics management", "synonyms": ["supply chain", "routing optimization"], "category": "operations" },
+  { "id": "k3", "term": "knowledge management", "synonyms": ["enterprise search", "document intelligence"], "category": "ai" },
+  { "id": "k4", "term": "OCR", "synonyms": ["optical character recognition", "text extraction"], "category": "ai" },
+  { "id": "k5", "term": "Keycloak", "synonyms": ["OAuth2", "identity provider", "OpenID Connect"], "category": "security" },
+  { "id": "k6", "term": "Apache Iceberg", "synonyms": ["table formats", "data lakehouse", "time travel"], "category": "data" },
+  { "id": "k7", "term": "Apache Spark", "synonyms": ["distributed processing", "data pipelines"], "category": "data" },
+  { "id": "k8", "term": "time series analytics", "synonyms": ["anomaly detection", "forecasting"], "category": "data" },
+  { "id": "k9", "term": "RAG", "synonyms": ["retrieval augmented generation", "vector search"], "category": "ai" },
+  { "id": "k10", "term": "Ollama", "synonyms": ["local LLMs", "LLM inference"], "category": "ai" }
+]

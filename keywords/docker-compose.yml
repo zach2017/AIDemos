@@ -1,0 +1,37 @@
+
+
+services:
+  chromadb:
+    image:  chromadb/chroma
+    container_name: chromadb
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - CHROMA_SERVER_HOST=0.0.0.0
+      - CHROMA_SERVER_HTTP_PORT=8000
+    volumes:
+      - chroma_data:/chroma/.chroma/index
+
+  keyword-app:
+    build: ./app
+    container_name: keyword-app
+    depends_on:
+      - chromadb
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - COLLECTION_NAME=keywords
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL}
+      - LOAD_ON_STARTUP=true
+      - TOP_K=10
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./app/data:/app/data:ro
+
+volumes:
+  chroma_data:

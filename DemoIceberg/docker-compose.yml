@@ -1,98 +1,77 @@
-version: '3.8'
 
 services:
-  # LocalStack for S3 emulation
-  localstack:
-    image: localstack/localstack:latest
-    container_name: localstack
-    ports:
-      - "4566:4566"
-      - "4510-4559:4510-4559"
-    environment:
-      - SERVICES=s3
-      - DEBUG=1
-      - DATA_DIR=/tmp/localstack/data
-      - DOCKER_HOST=unix:///var/run/docker.sock
-    volumes:
-      - "./localstack-data:/tmp/localstack"
-      - "/var/run/docker.sock:/var/run/docker.sock"
-    networks:
-      - iceberg-network
-
-  # Spark with Iceberg support
-  spark-iceberg:
-    image: tabulario/spark-iceberg:latest
-    container_name: spark-iceberg
-    build: ./docker/spark/
+  iceberg-webapp:
+    # This tells Compose to build the image from the Dockerfile in the ./app directory
+    build: ./app
+    container_name: iceberg-webapp
     depends_on:
-      - localstack
-    environment:
-      - AWS_ACCESS_KEY_ID=test
-      - AWS_SECRET_ACCESS_KEY=test
-      - AWS_REGION=us-east-1
+      # Ensures chroma and ollama are started before the webapp
+      chroma:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
     ports:
-      - "8888:8888"
-      - "8080:8080"
-      - "10000:10000"
-      - "10001:10001"
-    volumes:
-      - ./notebooks:/home/iceberg/notebooks
-      - ./data:/home/iceberg/data
-      - ./scripts:/home/iceberg/scripts
-    networks:
-      - iceberg-network
-    command: notebook
-
-  # Chroma Vector Database
-  chroma:
-    image: chromadb/chroma:latest
-    container_name: chroma
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./chroma-data:/chroma/chroma
+      - "8501:8501"
     environment:
-      - IS_PERSISTENT=TRUE
-      - ANONYMIZED_TELEMETRY=FALSE
-    networks:
-      - iceberg-network
-
-  # Ollama for embeddings and LLM
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ./ollama-data:/root/.ollama
-    networks:
-      - iceberg-network
-
-  # Python application container
-  app:
-    build: ./docker/app/
-    container_name: iceberg-app
-    depends_on:
-      - localstack
-      - spark-iceberg
-      - chroma
-      - ollama
-    environment:
-      - AWS_ACCESS_KEY_ID=test
-      - AWS_SECRET_ACCESS_KEY=test
-      - AWS_REGION=us-east-1
-      - AWS_ENDPOINT_URL=http://localstack:4566
+      # Environment variables passed to your streamlit app
       - CHROMA_HOST=chroma
       - CHROMA_PORT=8000
       - OLLAMA_HOST=ollama
-      - OLLAMA_PORT=11434
+      - OLLAMA_PORT=11434 # Default ollama port
     volumes:
-      - ./scripts:/app/scripts
-      - ./data:/app/data
+      # Mounts your local ./app directory into the container.
+      # Great for development, as changes to your .py file are reflected instantly.
+      - ./app:/app
     networks:
       - iceberg-network
-    command: tail -f /dev/null
+    healthcheck:
+      # This is the healthcheck you provided
+      test: ["CMD-SHELL", "curl -f http://localhost:8501/_stcore/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  chroma:
+    image: chromadb/chroma # Using a recent stable version
+    container_name: iceberg-chroma
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persists chroma data to a named volume
+      - chroma_data:/chroma/chroma
+    networks:
+      - iceberg-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: iceberg-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      # Persists ollama models and data
+      - ollama_data:/root/.ollama
+    networks:
+      - iceberg-network
+    healthcheck:
+      # Simple check to see if the ollama process is running
+      test: ["CMD", "ollama", "ps"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
 networks:
   iceberg-network:
     driver: bridge
+
+volumes:
+  # Defines the named volumes for persistent data
+  chroma_data:
+  ollama_data:

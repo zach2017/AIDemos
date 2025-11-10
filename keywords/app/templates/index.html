@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Keyword Finder</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@3.4.10/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <div class="max-w-4xl mx-auto p-6">
+    <h1 class="text-2xl font-bold mb-4">Document → Related Keywords</h1>
+    <form id="analyzeForm" class="space-y-4" enctype="multipart/form-data">
+      <textarea id="docText" name="docText" rows="8" class="w-full p-3 border rounded" placeholder="Paste your document text here..."></textarea>
+      <input type="file" id="fileInput" name="file" accept=".txt" class="block text-sm">
+      <button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Analyze</button>
+    </form>
+    <div id="loading" class="mt-6 hidden text-indigo-600">Analyzing…</div>
+    <div id="results" class="mt-6"></div>
+  </div>
+  <script>
+    const form = document.getElementById('analyzeForm');
+    const fileInput = document.getElementById('fileInput');
+    const docText = document.getElementById('docText');
+    const loading = document.getElementById('loading');
+    const resultsDiv = document.getElementById('results');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      resultsDiv.innerHTML = "";
+      loading.classList.remove('hidden');
+      let text = docText.value.trim();
+      if (!text && fileInput.files.length > 0) {
+        const file = fileInput.files[0];
+        text = await file.text();
+      }
+      const res = await fetch('/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      const data = await res.json();
+      loading.classList.add('hidden');
+      const items = data.matches || [];
+      if (!items.length) {
+        resultsDiv.innerHTML = "<p>No keywords found.</p>";
+        return;
+      }
+      let html = "<ul class='list-disc pl-5'>";
+      for (const it of items) {
+        html += `<li><strong>${it.metadata?.term || it.document}</strong> - Similarity: ${(it.score || 0).toFixed(4)}</li>`;
+      }
+      html += "</ul>";
+      resultsDiv.innerHTML = html;
+    });
+  </script>
+</body>
+</html>
