@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure Document Upload</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7/bundles/stomp.umd.min.js"></script>
+    <script src="http://localhost:8180/js/keycloak.js"></script>
+</head>
+<body class="bg-gray-100">
+
+    <div class="container mx-auto p-8 max-w-2xl">
+        <h1 class="text-3xl font-bold text-gray-800 mb-6">Secure Document Upload</h1>
+
+        <div class="bg-white p-4 rounded-lg shadow-md mb-6 flex justify-between items-center">
+            <span id="username" class="text-gray-700">Not logged in.</span>
+            <div>
+                <button id="login-btn" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+                    Login
+                </button>
+                <button id="logout-btn" class="hidden bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">
+                    Logout
+                </button>
+            </div>
+        </div>
+
+        <div id="upload-section" class="hidden bg-white p-6 rounded-lg shadow-md mb-6">
+            <h2 class="text-xl font-semibold mb-4">Upload Documents</h2>
+            <form id="upload-form">
+                <input type="file" id="file-input" multiple
+                       class="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50 focus:outline-none" />
+                <button type="submit" class="mt-4 w-full bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">
+                    Upload
+                </button>
+            </form>
+        </div>
+
+        <div class="bg-white p-6 rounded-lg shadow-md">
+            <h2 class="text-xl font-semibold mb-4">File Status</h2>
+            <ul id="status-list" class="list-disc list-inside space-y-2 text-gray-700">
+                <li class="text-gray-400">Waiting for uploads...</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // --- Keycloak Configuration ---
+        const keycloak = new Keycloak({
+            url: "http://localhost:8180",
+            realm: "spring-demo",
+            clientId: "spring-client"
+        });
+
+        const loginBtn = document.getElementById('login-btn');
+        const logoutBtn = document.getElementById('logout-btn');
+        const usernameEl = document.getElementById('username');
+        const uploadSection = document.getElementById('upload-section');
+        const uploadForm = document.getElementById('upload-form');
+        const fileInput = document.getElementById('file-input');
+        const statusList = document.getElementById('status-list');
+        
+        let stompClient = null;
+
+        // --- 1. Keycloak Initialization ---
+        keycloak.init({ onLoad: 'check-sso' })
+            .then(authenticated => {
+                if (authenticated) {
+                    console.log('User is authenticated');
+                    setupAuthenticatedState(keycloak.tokenParsed);
+                    connectWebSocket();
+                } else {
+                    console.log('User is not authenticated');
+                    setupGuestState();
+                }
+            })
+            .catch(err => console.error('Keycloak init failed', err));
+
+        // --- 2. Auth State UI ---
+        function setupAuthenticatedState(profile) {
+            loginBtn.classList.add('hidden');
+            logoutBtn.classList.remove('hidden');
+            uploadSection.classList.remove('hidden');
+            usernameEl.textContent = `Logged in as: ${profile.preferred_username}`;
+            statusList.innerHTML = ''; // Clear "Waiting for uploads"
+        }
+
+        function setupGuestState() {
+            loginBtn.classList.remove('hidden');
+            logoutBtn.classList.add('hidden');
+            uploadSection.classList.add('hidden');
+            usernameEl.textContent = 'Not logged in.';
+            statusList.innerHTML = '<li class="text-gray-400">Please log in to see status.</li>';
+        }
+
+        loginBtn.onclick = () => keycloak.login();
+        logoutBtn.onclick = () => keycloak.logout();
+
+        // --- 3. WebSocket Connection ---
+        function connectWebSocket() {
+            if (!keycloak.authenticated) return;
+
+            const socket = new SockJS('/ws');
+            stompClient = Stomp.over(socket);
+
+            stompClient.connect({}, (frame) => {
+                console.log('Connected to WebSocket: ' + frame);
+                // Subscribe to the user-specific topic
+                stompClient.subscribe(`/topic/status.${keycloak.subject}`, (message) => {
+                    const status = JSON.parse(message.body);
+                    console.log('Received status:', status);
+                    addStatusItem(status);
+                });
+            }, (error) => {
+                console.error('WebSocket connection error:', error);
+                setTimeout(connectWebSocket, 5000); // Try to reconnect
+            });
+        }
+
+        function addStatusItem(status) {
+            const sizeInMB = (status.fileSize / (1024 * 1024)).toFixed(2);
+            let statusClass = 'text-blue-500';
+            let statusIcon = '⏳';
+
+            if (status.status === 'PROCESSED') {
+                statusClass = 'text-green-500';
+                statusIcon = '✅';
+            } else if (status.status === 'MALWARE_DETECTED') {
+                statusClass = 'text-red-500';
+                statusIcon = '☣️';
+            } else if (status.status === 'ERROR') {
+                statusClass = 'text-red-500';
+                statusIcon = '❌';
+            }
+
+            const li = document.createElement('li');
+            li.className = `font-mono ${statusClass}`;
+            li.innerHTML = `${statusIcon} [${status.status}] ${status.fileName} (${sizeInMB} MB)`;
+            statusList.prepend(li);
+        }
+
+        // --- 4. File Upload Handler ---
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!keycloak.authenticated || fileInput.files.length === 0) {
+                return;
+            }
+
+            try {
+                // Ensure token is fresh
+                await keycloak.updateToken(30);
+
+                const formData = new FormData();
+                for (const file of fileInput.files) {
+                    formData.append('files', file);
+                }
+
+                // Use Axios to send multipart form data
+                const response = await axios.post('/api/upload', formData, {
+                    headers: {
+                        'Authorization': `Bearer ${keycloak.token}`,
+                        'Content-Type': 'multipart/form-data'
+                    }
+                });
+
+                console.log('Upload successful:', response.data);
+                // "PENDING" status will arrive via WebSocket, so no UI update here
+                fileInput.value = ''; // Clear the file input
+
+            } catch (error) {
+                console.error('Upload failed:', error);
+                addStatusItem({
+                    status: 'UPLOAD_ERROR',
+                    fileName: 'Upload failed, check console',
+                    fileSize: 0
+                });
+            }
+        });
+    </script>
+</body>
+</html>
