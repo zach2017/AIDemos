@@ -857,3 +857,1252 @@ This OAuth2 implementation provides:
 - Centralized authentication with Keycloak
 
 The key advantage is that React doesn't need to manage tokens manually—the browser handles everything automatically through cookies, making the implementation cleaner and more secure.
+
+# OAuth2 Security: MITM Protection & Cookie Alternatives
+
+## Table of Contents
+1. [Man-in-the-Middle (MITM) Attack Overview](#mitm-attack-overview)
+2. [Protection Mechanisms](#protection-mechanisms)
+3. [Are Cookies Required?](#are-cookies-required)
+4. [Token Storage Alternatives](#token-storage-alternatives)
+5. [Security Comparison](#security-comparison)
+6. [Implementation Examples](#implementation-examples)
+7. [Best Practices](#best-practices)
+
+---
+
+## Man-in-the-Middle (MITM) Attack Overview
+
+### What is a MITM Attack?
+
+A Man-in-the-Middle attack occurs when an attacker intercepts communication between two parties:
+
+```
+USER <----[ATTACKER]----> SERVER
+```
+
+### MITM Attack Vectors in OAuth2
+
+#### 1. **Authorization Code Interception**
+```
+User → Keycloak: Login successful
+Keycloak → User: Redirect to /callback?code=ABC123
+ATTACKER intercepts: code=ABC123
+Attacker → Backend: /callback?code=ABC123
+Backend → Attacker: Access Token (COMPROMISED)
+```
+
+#### 2. **Token Theft in Transit**
+```
+Backend → User: Set-Cookie: access_token=JWT_TOKEN
+ATTACKER intercepts: JWT_TOKEN
+Attacker can now: Impersonate user with stolen token
+```
+
+#### 3. **Redirect URI Manipulation**
+```
+User clicks: Login
+Attacker modifies: redirect_uri=https://evil.com
+Keycloak redirects to: https://evil.com?code=ABC123
+Attacker: Steals authorization code
+```
+
+#### 4. **SSL Stripping**
+```
+User requests: https://yourapp.com
+Attacker downgrades: http://yourapp.com (no encryption)
+All traffic: Visible to attacker
+```
+
+---
+
+## Protection Mechanisms
+
+### 1. HTTPS/TLS (Mandatory)
+
+**What it does:**
+- Encrypts all data in transit
+- Prevents eavesdropping and tampering
+- Validates server identity via certificates
+
+**Implementation:**
+
+```java
+// SecurityConfig.java
+@Bean
+public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    http
+        .requiresChannel(channel -> channel
+            .anyRequest().requiresSecure() // Force HTTPS
+        )
+        // ... rest of config
+}
+```
+
+**Cookie Configuration:**
+```java
+Cookie tokenCookie = new Cookie("access_token", accessToken);
+tokenCookie.setSecure(true);  // ⚠️ CRITICAL: Only sent over HTTPS
+tokenCookie.setHttpOnly(true); // Prevents JavaScript access
+```
+
+**Spring Boot application.properties:**
+```properties
+# Force HTTPS
+server.ssl.enabled=true
+server.ssl.key-store=classpath:keystore.p12
+server.ssl.key-store-password=your-password
+server.ssl.key-store-type=PKCS12
+server.ssl.key-alias=tomcat
+
+# Redirect HTTP to HTTPS
+server.port=8443
+```
+
+**Key Points:**
+- Without HTTPS, ALL OAuth2 security is meaningless
+- Use valid SSL certificates (not self-signed in production)
+- TLS 1.2 or higher required
+- Strong cipher suites only
+
+---
+
+### 2. PKCE (Proof Key for Code Exchange)
+
+**What it does:**
+- Prevents authorization code interception attacks
+- Even if code is stolen, attacker can't exchange it for token
+- Required for mobile/SPA apps, recommended for all
+
+**How PKCE Works:**
+
+```
+Step 1: Client generates random code_verifier
+  code_verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+
+Step 2: Client creates code_challenge from verifier
+  code_challenge = BASE64URL(SHA256(code_verifier))
+  code_challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+
+Step 3: Authorization request includes challenge
+  /auth?client_id=app
+       &redirect_uri=http://localhost/callback
+       &response_type=code
+       &code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM
+       &code_challenge_method=S256
+
+Step 4: Keycloak stores challenge with code
+
+Step 5: Token exchange includes original verifier
+  POST /token
+  grant_type=authorization_code
+  &code=AUTH_CODE
+  &redirect_uri=http://localhost/callback
+  &code_verifier=dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk
+
+Step 6: Keycloak verifies: SHA256(code_verifier) == code_challenge
+  ✅ Match: Issue token
+  ❌ No match: Reject (code was stolen)
+```
+
+**Java Implementation:**
+
+```java
+import java.security.MessageDigest;
+import java.security.SecureRandom;
+import java.util.Base64;
+
+public class PKCEUtil {
+    
+    // Generate random code verifier
+    public static String generateCodeVerifier() {
+        SecureRandom secureRandom = new SecureRandom();
+        byte[] code = new byte[32];
+        secureRandom.nextBytes(code);
+        return Base64.getUrlEncoder()
+            .withoutPadding()
+            .encodeToString(code);
+    }
+    
+    // Generate code challenge from verifier
+    public static String generateCodeChallenge(String codeVerifier) {
+        try {
+            byte[] bytes = codeVerifier.getBytes("US-ASCII");
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            md.update(bytes);
+            byte[] digest = md.digest();
+            return Base64.getUrlEncoder()
+                .withoutPadding()
+                .encodeToString(digest);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+}
+```
+
+**Updated SecurityConfig with PKCE:**
+
+```java
+@Bean
+public AuthenticationEntryPoint keycloakAuthenticationEntryPoint() {
+    return (request, response, authException) -> {
+        // Generate PKCE parameters
+        String codeVerifier = PKCEUtil.generateCodeVerifier();
+        String codeChallenge = PKCEUtil.generateCodeChallenge(codeVerifier);
+        
+        // Store verifier in session (will need for token exchange)
+        request.getSession().setAttribute("code_verifier", codeVerifier);
+        
+        String authorizationUrl = String.format(
+            "%s/realms/%s/protocol/openid-connect/auth?client_id=%s&redirect_uri=%s&response_type=code&scope=openid&code_challenge=%s&code_challenge_method=S256",
+            keycloakUrl, realm, clientId, redirectUri, codeChallenge
+        );
+        response.sendRedirect(authorizationUrl);
+    };
+}
+```
+
+**Updated OAuth2CallbackController with PKCE:**
+
+```java
+@GetMapping("/oauth2/callback")
+public void handleCallback(
+        @RequestParam("code") String code,
+        HttpServletRequest request,
+        HttpServletResponse response) throws Exception {
+    
+    // Retrieve stored code verifier
+    String codeVerifier = (String) request.getSession().getAttribute("code_verifier");
+    request.getSession().removeAttribute("code_verifier");
+    
+    // Token exchange with PKCE
+    MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
+    body.add("grant_type", "authorization_code");
+    body.add("client_id", clientId);
+    body.add("code", code);
+    body.add("redirect_uri", redirectUri);
+    body.add("code_verifier", codeVerifier); // ⚠️ Include verifier
+    
+    // ... rest of token exchange
+}
+```
+
+**Why PKCE Matters:**
+- Even if attacker intercepts authorization code, they can't use it
+- They don't have the original code_verifier
+- Keycloak validates verifier matches challenge before issuing token
+
+---
+
+### 3. State Parameter (CSRF Protection)
+
+**What it does:**
+- Prevents Cross-Site Request Forgery (CSRF)
+- Validates callback request originated from your app
+- Ties OAuth request to user session
+
+**Implementation:**
+
+```java
+@Bean
+public AuthenticationEntryPoint keycloakAuthenticationEntryPoint() {
+    return (request, response, authException) -> {
+        // Generate random state token
+        String state = UUID.randomUUID().toString();
+        
+        // Store in session
+        request.getSession().setAttribute("oauth_state", state);
+        
+        String authorizationUrl = String.format(
+            "%s/realms/%s/protocol/openid-connect/auth?client_id=%s&redirect_uri=%s&response_type=code&scope=openid&state=%s",
+            keycloakUrl, realm, clientId, redirectUri, state
+        );
+        response.sendRedirect(authorizationUrl);
+    };
+}
+```
+
+```java
+@GetMapping("/oauth2/callback")
+public void handleCallback(
+        @RequestParam("code") String code,
+        @RequestParam("state") String state,
+        HttpServletRequest request,
+        HttpServletResponse response) throws Exception {
+    
+    // Validate state parameter
+    String sessionState = (String) request.getSession().getAttribute("oauth_state");
+    if (sessionState == null || !sessionState.equals(state)) {
+        response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Invalid state parameter");
+        return;
+    }
+    request.getSession().removeAttribute("oauth_state");
+    
+    // Proceed with token exchange...
+}
+```
+
+**Attack Scenario Prevented:**
+```
+1. Attacker initiates OAuth on their device
+2. Keycloak redirects: /callback?code=ATTACKER_CODE&state=ATTACKER_STATE
+3. Attacker tricks victim to visit: yourapp.com/callback?code=ATTACKER_CODE&state=ATTACKER_STATE
+4. Your app checks: state != session_state
+5. ❌ Request rejected (states don't match)
+```
+
+---
+
+### 4. Strict Redirect URI Validation
+
+**What it does:**
+- Prevents redirect to malicious sites
+- Keycloak validates redirect_uri exactly matches registered value
+
+**Keycloak Configuration:**
+```
+Client Settings:
+  Valid Redirect URIs: https://yourapp.com/oauth2/callback (exact match)
+  
+❌ Will reject: https://evil.com/steal
+❌ Will reject: https://yourapp.com.evil.com/callback
+❌ Will reject: https://yourapp.com/oauth2/callback/../evil
+✅ Will accept: https://yourapp.com/oauth2/callback
+```
+
+**Backend Validation:**
+```java
+@Value("${keycloak.redirect-uri}")
+private String redirectUri;
+
+// In token exchange
+body.add("redirect_uri", redirectUri); // Must match exactly
+```
+
+---
+
+### 5. Token Expiration & Rotation
+
+**Short-lived Access Tokens:**
+```properties
+# Keycloak settings
+Access Token Lifespan: 15 minutes (not 24 hours!)
+Refresh Token Lifespan: 30 minutes
+```
+
+**Benefits:**
+- If token is stolen, damage window is limited
+- Token becomes useless after expiration
+- Forces periodic re-authentication
+
+**Implementation:**
+```java
+Cookie tokenCookie = new Cookie("access_token", accessToken);
+tokenCookie.setMaxAge(expiresIn); // Token expires with cookie
+```
+
+---
+
+### 6. Certificate Pinning (Advanced)
+
+**What it does:**
+- App only trusts specific SSL certificates
+- Prevents rogue Certificate Authority attacks
+
+**Implementation:**
+```java
+@Bean
+public RestTemplate restTemplate() throws Exception {
+    SSLContext sslContext = SSLContextBuilder
+        .create()
+        .loadTrustMaterial(
+            ResourceUtils.getFile("classpath:keycloak-cert.pem"),
+            null
+        )
+        .build();
+    
+    SSLConnectionSocketFactory socketFactory = 
+        new SSLConnectionSocketFactory(sslContext);
+    
+    HttpClient httpClient = HttpClients.custom()
+        .setSSLSocketFactory(socketFactory)
+        .build();
+    
+    HttpComponentsClientHttpRequestFactory factory = 
+        new HttpComponentsClientHttpRequestFactory(httpClient);
+    
+    return new RestTemplate(factory);
+}
+```
+
+**Warning:** Requires careful certificate management and rotation
+
+---
+
+### 7. Content Security Policy (CSP)
+
+**What it does:**
+- Prevents injection of malicious scripts
+- Restricts where resources can be loaded from
+
+**Implementation:**
+```java
+@Bean
+public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    http
+        .headers(headers -> headers
+            .contentSecurityPolicy(csp -> csp
+                .policyDirectives("default-src 'self'; script-src 'self'; style-src 'self'")
+            )
+        );
+}
+```
+
+---
+
+## Are Cookies Required?
+
+### Short Answer: **NO, cookies are NOT required**
+
+Your current implementation uses cookies for convenience and security, but there are multiple alternatives.
+
+### Why Your Implementation Uses Cookies
+
+**Advantages:**
+1. **Automatic management** - Browser sends cookie with every request
+2. **HttpOnly flag** - JavaScript cannot access (XSS protection)
+3. **Secure flag** - Only sent over HTTPS (MITM protection)
+4. **SameSite attribute** - CSRF protection
+5. **No client-side code** - React doesn't manage tokens
+
+**Disadvantages:**
+1. **CORS complexity** - Need `credentials: 'include'` and CORS config
+2. **Mobile apps** - Cookies not ideal for native mobile
+3. **Third-party cookies** - Being deprecated in browsers
+4. **Cookie size limits** - 4KB limit per cookie
+
+---
+
+## Token Storage Alternatives
+
+### Option 1: Authorization Header (Recommended for APIs)
+
+**How it works:**
+- React stores token in memory
+- Manually adds `Authorization: Bearer <token>` header to each request
+- No cookies involved
+
+**Backend Changes:**
+
+```java
+// Remove cookie filter entirely
+@Bean
+public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    http
+        // NO cookieToHeaderFilter needed
+        .authorizeHttpRequests(authz -> authz
+            .requestMatchers("/oauth2/callback", "/error").permitAll()
+            .anyRequest().authenticated()
+        )
+        .oauth2ResourceServer(oauth2 -> oauth2
+            .jwt() // Still validates JWT from Authorization header
+        )
+        .csrf(csrf -> csrf.disable());
+    
+    return http.build();
+}
+```
+
+**OAuth2CallbackController Changes:**
+
+```java
+@GetMapping("/oauth2/callback")
+public ResponseEntity<?> handleCallback(
+        @RequestParam("code") String code,
+        HttpServletResponse response) throws Exception {
+    
+    // Exchange code for token (same as before)
+    // ...
+    
+    String accessToken = (String) tokenResponse.getBody().get("access_token");
+    String refreshToken = (String) tokenResponse.getBody().get("refresh_token");
+    Integer expiresIn = (Integer) tokenResponse.getBody().get("expires_in");
+    
+    // Return tokens in JSON response (no cookies)
+    Map<String, Object> tokens = new HashMap<>();
+    tokens.put("access_token", accessToken);
+    tokens.put("refresh_token", refreshToken);
+    tokens.put("expires_in", expiresIn);
+    
+    return ResponseEntity.ok(tokens);
+}
+```
+
+**React Implementation:**
+
+```javascript
+// AuthContext.js
+import { createContext, useState, useContext, useEffect } from 'react';
+
+const AuthContext = createContext();
+
+export function AuthProvider({ children }) {
+  const [accessToken, setAccessToken] = useState(null);
+  const [user, setUser] = useState(null);
+
+  const login = async (code) => {
+    try {
+      // Exchange code for token
+      const response = await fetch(`http://localhost:8080/oauth2/callback?code=${code}`);
+      const data = await response.json();
+      
+      // Store token in memory (or localStorage if needed)
+      setAccessToken(data.access_token);
+      
+      // Optionally store refresh token
+      localStorage.setItem('refresh_token', data.refresh_token);
+      
+      // Fetch user info
+      await fetchUserInfo(data.access_token);
+    } catch (error) {
+      console.error('Login failed:', error);
+    }
+  };
+
+  const fetchUserInfo = async (token) => {
+    const response = await fetch('http://localhost:8080/api/user-info', {
+      headers: {
+        'Authorization': `Bearer ${token}`, // Manual header
+        'Accept': 'application/json',
+      }
+    });
+    
+    if (response.ok) {
+      const userData = await response.json();
+      setUser(userData);
+    }
+  };
+
+  const logout = () => {
+    setAccessToken(null);
+    setUser(null);
+    localStorage.removeItem('refresh_token');
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, accessToken, login, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export const useAuth = () => useContext(AuthContext);
+```
+
+**API Client with Authorization Header:**
+
+```javascript
+// api.js
+export const apiClient = {
+  async get(endpoint, token) {
+    const response = await fetch(`http://localhost:8080/api${endpoint}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`, // Manual token
+        'Accept': 'application/json',
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  },
+
+  async post(endpoint, data, token) {
+    const response = await fetch(`http://localhost:8080/api${endpoint}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`, // Manual token
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  }
+};
+
+// Usage
+function UserProfile() {
+  const { accessToken } = useAuth();
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    if (accessToken) {
+      apiClient.get('/user-info', accessToken)
+        .then(setUser)
+        .catch(console.error);
+    }
+  }, [accessToken]);
+
+  return <div>{user?.name}</div>;
+}
+```
+
+**Pros:**
+- ✅ Simple backend (no custom filter)
+- ✅ No CORS credential issues
+- ✅ Works for mobile apps
+- ✅ Standard REST API pattern
+- ✅ Token visible for debugging
+
+**Cons:**
+- ❌ React must manage token in memory
+- ❌ Token can be accessed by JavaScript (XSS risk)
+- ❌ Must manually add header to each request
+- ❌ Token lost on page refresh (unless stored somewhere)
+
+---
+
+### Option 2: localStorage (Common but Less Secure)
+
+**How it works:**
+- Store token in browser's localStorage
+- Persists across page refreshes and sessions
+- Manually add to Authorization header
+
+**React Implementation:**
+
+```javascript
+// AuthContext.js
+export function AuthProvider({ children }) {
+  const [accessToken, setAccessToken] = useState(
+    localStorage.getItem('access_token')
+  );
+
+  const login = async (code) => {
+    const response = await fetch(`http://localhost:8080/oauth2/callback?code=${code}`);
+    const data = await response.json();
+    
+    // Store in localStorage
+    localStorage.setItem('access_token', data.access_token);
+    localStorage.setItem('refresh_token', data.refresh_token);
+    setAccessToken(data.access_token);
+  };
+
+  const logout = () => {
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+    setAccessToken(null);
+  };
+
+  // Check for token on mount
+  useEffect(() => {
+    const token = localStorage.getItem('access_token');
+    if (token) {
+      // Validate token is still valid
+      validateToken(token);
+    }
+  }, []);
+
+  return (
+    <AuthContext.Provider value={{ accessToken, login, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+```
+
+**Pros:**
+- ✅ Persists across page refreshes
+- ✅ Simple to implement
+- ✅ No server-side session needed
+- ✅ Works across tabs
+
+**Cons:**
+- ❌ Vulnerable to XSS attacks
+- ❌ Accessible by any JavaScript (including malicious scripts)
+- ❌ Not automatically sent with requests
+- ❌ No protection from JavaScript access
+
+---
+
+### Option 3: sessionStorage (Better than localStorage)
+
+**How it works:**
+- Similar to localStorage but cleared when tab closes
+- Shorter lifetime = reduced risk
+
+**Implementation:**
+
+```javascript
+// Use sessionStorage instead
+sessionStorage.setItem('access_token', data.access_token);
+const token = sessionStorage.getItem('access_token');
+sessionStorage.removeItem('access_token');
+```
+
+**Pros:**
+- ✅ Cleared when tab closes
+- ✅ Not shared across tabs
+- ✅ Simpler than cookies
+
+**Cons:**
+- ❌ Still vulnerable to XSS
+- ❌ Lost on tab close
+- ❌ Accessible by JavaScript
+
+---
+
+### Option 4: Memory Only (Most Secure, No Persistence)
+
+**How it works:**
+- Store token only in React state
+- Never persisted anywhere
+- Lost on page refresh
+
+**Implementation:**
+
+```javascript
+export function AuthProvider({ children }) {
+  const [accessToken, setAccessToken] = useState(null); // Memory only
+
+  // No persistence - token lost on refresh
+}
+```
+
+**Pros:**
+- ✅ Most secure (not persisted)
+- ✅ Can't be stolen if user leaves computer
+- ✅ No XSS risk for long-term storage
+
+**Cons:**
+- ❌ Lost on page refresh (bad UX)
+- ❌ User must re-login frequently
+- ❌ Not practical for most apps
+
+---
+
+### Option 5: Hybrid Approach (Recommended)
+
+**How it works:**
+- Store refresh token in HttpOnly cookie
+- Store access token in memory
+- Use refresh token to get new access token
+
+**Backend:**
+
+```java
+@GetMapping("/oauth2/callback")
+public ResponseEntity<?> handleCallback(
+        @RequestParam("code") String code,
+        HttpServletResponse response) throws Exception {
+    
+    // Exchange code for tokens
+    String accessToken = (String) tokenResponse.getBody().get("access_token");
+    String refreshToken = (String) tokenResponse.getBody().get("refresh_token");
+    Integer expiresIn = (Integer) tokenResponse.getBody().get("expires_in");
+    
+    // Store REFRESH token in HttpOnly cookie (secure)
+    Cookie refreshCookie = new Cookie("refresh_token", refreshToken);
+    refreshCookie.setHttpOnly(true);
+    refreshCookie.setSecure(true);
+    refreshCookie.setPath("/");
+    refreshCookie.setMaxAge(30 * 24 * 60 * 60); // 30 days
+    response.addCookie(refreshCookie);
+    
+    // Return ACCESS token in JSON (short-lived)
+    Map<String, Object> tokens = new HashMap<>();
+    tokens.put("access_token", accessToken);
+    tokens.put("expires_in", expiresIn);
+    
+    return ResponseEntity.ok(tokens);
+}
+
+@PostMapping("/api/refresh")
+public ResponseEntity<?> refresh(HttpServletRequest request) {
+    // Extract refresh token from cookie
+    Cookie[] cookies = request.getCookies();
+    String refreshToken = null;
+    
+    if (cookies != null) {
+        for (Cookie cookie : cookies) {
+            if ("refresh_token".equals(cookie.getName())) {
+                refreshToken = cookie.getValue();
+                break;
+            }
+        }
+    }
+    
+    if (refreshToken == null) {
+        return ResponseEntity.status(401).body("No refresh token");
+    }
+    
+    // Exchange refresh token for new access token
+    // ... call Keycloak token endpoint with grant_type=refresh_token
+    
+    Map<String, Object> tokens = new HashMap<>();
+    tokens.put("access_token", newAccessToken);
+    tokens.put("expires_in", expiresIn);
+    
+    return ResponseEntity.ok(tokens);
+}
+```
+
+**React:**
+
+```javascript
+export function AuthProvider({ children }) {
+  const [accessToken, setAccessToken] = useState(null); // Memory only
+
+  const refreshAccessToken = async () => {
+    try {
+      const response = await fetch('http://localhost:8080/api/refresh', {
+        method: 'POST',
+        credentials: 'include', // Send refresh token cookie
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setAccessToken(data.access_token);
+        return data.access_token;
+      } else {
+        // Refresh token expired, need to re-login
+        logout();
+      }
+    } catch (error) {
+      console.error('Token refresh failed:', error);
+      logout();
+    }
+  };
+
+  // Auto-refresh before expiration
+  useEffect(() => {
+    if (accessToken) {
+      const interval = setInterval(() => {
+        refreshAccessToken();
+      }, 14 * 60 * 1000); // Refresh every 14 minutes (token expires at 15)
+      
+      return () => clearInterval(interval);
+    }
+  }, [accessToken]);
+
+  return (
+    <AuthContext.Provider value={{ accessToken, refreshAccessToken, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+```
+
+**Pros:**
+- ✅ Access token not persisted (XSS safe)
+- ✅ Refresh token in HttpOnly cookie (secure)
+- ✅ Automatic token refresh
+- ✅ Good UX (no frequent re-logins)
+- ✅ Best of both worlds
+
+**Cons:**
+- ❌ More complex implementation
+- ❌ Still need CORS for refresh endpoint
+
+---
+
+## Security Comparison
+
+| Storage Method | XSS Protection | CSRF Protection | MITM Protection | Persistence | Complexity |
+|---------------|----------------|-----------------|-----------------|-------------|------------|
+| **HttpOnly Cookie** | ✅ Excellent | ⚠️ Need SameSite | ✅ With Secure flag | ✅ Yes | Medium |
+| **Authorization Header + Memory** | ⚠️ If no storage | ✅ N/A | ✅ With HTTPS | ❌ No | Low |
+| **localStorage** | ❌ Vulnerable | ✅ N/A | ✅ With HTTPS | ✅ Yes | Low |
+| **sessionStorage** | ❌ Vulnerable | ✅ N/A | ✅ With HTTPS | ⚠️ Tab only | Low |
+| **Hybrid (Recommended)** | ✅ Excellent | ⚠️ Need SameSite | ✅ With HTTPS | ✅ Yes | High |
+
+---
+
+## Implementation Examples
+
+### Complete Hybrid Implementation
+
+**Backend (Spring Boot):**
+
+```java
+// SecurityConfig.java
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+    
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+            .authorizeHttpRequests(authz -> authz
+                .requestMatchers(
+                    "/oauth2/callback",
+                    "/api/refresh",
+                    "/error"
+                ).permitAll()
+                .anyRequest().authenticated()
+            )
+            .oauth2ResourceServer(oauth2 -> oauth2
+                .jwt() // Validates Bearer token from Authorization header
+            )
+            .csrf(csrf -> csrf
+                .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                .ignoringRequestMatchers("/api/refresh") // Allow refresh without CSRF
+            );
+        
+        return http.build();
+    }
+}
+
+// OAuth2CallbackController.java
+@RestController
+public class OAuth2CallbackController {
+    
+    @GetMapping("/oauth2/callback")
+    public ResponseEntity<?> handleCallback(
+            @RequestParam("code") String code,
+            @RequestParam("state") String state,
+            HttpServletRequest request,
+            HttpServletResponse response) throws Exception {
+        
+        // Validate state (CSRF protection)
+        String sessionState = (String) request.getSession().getAttribute("oauth_state");
+        if (!state.equals(sessionState)) {
+            return ResponseEntity.badRequest().body("Invalid state");
+        }
+        
+        // Exchange code for tokens (with PKCE)
+        String codeVerifier = (String) request.getSession().getAttribute("code_verifier");
+        Map<String, Object> tokenResponse = exchangeCodeForToken(code, codeVerifier);
+        
+        String accessToken = (String) tokenResponse.get("access_token");
+        String refreshToken = (String) tokenResponse.get("refresh_token");
+        Integer expiresIn = (Integer) tokenResponse.get("expires_in");
+        
+        // Store refresh token in secure cookie
+        Cookie refreshCookie = new Cookie("refresh_token", refreshToken);
+        refreshCookie.setHttpOnly(true);
+        refreshCookie.setSecure(true);
+        refreshCookie.setSameSite("Strict");
+        refreshCookie.setPath("/");
+        refreshCookie.setMaxAge(30 * 24 * 60 * 60); // 30 days
+        response.addCookie(refreshCookie);
+        
+        // Return access token in response
+        Map<String, Object> result = new HashMap<>();
+        result.put("access_token", accessToken);
+        result.put("expires_in", expiresIn);
+        result.put("token_type", "Bearer");
+        
+        return ResponseEntity.ok(result);
+    }
+    
+    @PostMapping("/api/refresh")
+    public ResponseEntity<?> refreshToken(HttpServletRequest request) {
+        // Extract refresh token from cookie
+        String refreshToken = extractRefreshToken(request);
+        
+        if (refreshToken == null) {
+            return ResponseEntity.status(401).body("No refresh token");
+        }
+        
+        try {
+            // Exchange refresh token for new access token
+            Map<String, Object> tokenResponse = refreshAccessToken(refreshToken);
+            
+            String newAccessToken = (String) tokenResponse.get("access_token");
+            Integer expiresIn = (Integer) tokenResponse.get("expires_in");
+            
+            Map<String, Object> result = new HashMap<>();
+            result.put("access_token", newAccessToken);
+            result.put("expires_in", expiresIn);
+            result.put("token_type", "Bearer");
+            
+            return ResponseEntity.ok(result);
+            
+        } catch (Exception e) {
+            return ResponseEntity.status(401).body("Token refresh failed");
+        }
+    }
+    
+    private Map<String, Object> refreshAccessToken(String refreshToken) {
+        String tokenEndpoint = String.format(
+            "%s/realms/%s/protocol/openid-connect/token",
+            keycloakUrl, realm
+        );
+        
+        RestTemplate restTemplate = new RestTemplate();
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+        
+        MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
+        body.add("grant_type", "refresh_token");
+        body.add("client_id", clientId);
+        body.add("client_secret", clientSecret);
+        body.add("refresh_token", refreshToken);
+        
+        HttpEntity<MultiValueMap<String, String>> request = 
+            new HttpEntity<>(body, headers);
+            
+        ResponseEntity<Map> response = restTemplate.postForEntity(
+            tokenEndpoint, request, Map.class
+        );
+        
+        return response.getBody();
+    }
+}
+```
+
+**React Implementation:**
+
+```javascript
+// api.js
+export class ApiClient {
+  constructor() {
+    this.baseURL = 'http://localhost:8080/api';
+    this.accessToken = null;
+    this.refreshPromise = null;
+  }
+
+  setAccessToken(token) {
+    this.accessToken = token;
+  }
+
+  async refreshAccessToken() {
+    // Prevent multiple simultaneous refresh requests
+    if (this.refreshPromise) {
+      return this.refreshPromise;
+    }
+
+    this.refreshPromise = fetch('http://localhost:8080/api/refresh', {
+      method: 'POST',
+      credentials: 'include', // Send refresh token cookie
+    })
+      .then(response => {
+        if (!response.ok) {
+          throw new Error('Token refresh failed');
+        }
+        return response.json();
+      })
+      .then(data => {
+        this.accessToken = data.access_token;
+        this.refreshPromise = null;
+        return data.access_token;
+      })
+      .catch(error => {
+        this.refreshPromise = null;
+        throw error;
+      });
+
+    return this.refreshPromise;
+  }
+
+  async request(endpoint, options = {}) {
+    // Add Authorization header
+    const headers = {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      ...options.headers,
+    };
+
+    if (this.accessToken) {
+      headers['Authorization'] = `Bearer ${this.accessToken}`;
+    }
+
+    let response = await fetch(`${this.baseURL}${endpoint}`, {
+      ...options,
+      headers,
+    });
+
+    // If unauthorized, try refreshing token
+    if (response.status === 401 && this.accessToken) {
+      try {
+        await this.refreshAccessToken();
+        
+        // Retry original request with new token
+        headers['Authorization'] = `Bearer ${this.accessToken}`;
+        response = await fetch(`${this.baseURL}${endpoint}`, {
+          ...options,
+          headers,
+        });
+      } catch (error) {
+        // Refresh failed, user needs to re-login
+        throw new Error('Session expired. Please login again.');
+      }
+    }
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  async get(endpoint) {
+    return this.request(endpoint, { method: 'GET' });
+  }
+
+  async post(endpoint, data) {
+    return this.request(endpoint, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+}
+
+export const apiClient = new ApiClient();
+```
+
+---
+
+## Best Practices
+
+### 1. Always Use HTTPS in Production
+
+```properties
+# application.properties
+server.ssl.enabled=true
+server.port=8443
+```
+
+### 2. Implement PKCE for All OAuth Flows
+
+```java
+// Always include code_challenge
+&code_challenge=${challenge}
+&code_challenge_method=S256
+```
+
+### 3. Use State Parameter
+
+```java
+// Always validate state matches
+if (!state.equals(sessionState)) {
+    throw new SecurityException("State mismatch");
+}
+```
+
+### 4. Short Token Lifetimes
+
+```
+Access Token: 15 minutes
+Refresh Token: 30 days
+```
+
+### 5. Implement Token Refresh
+
+```javascript
+// Auto-refresh before expiration
+setInterval(refreshToken, 14 * 60 * 1000);
+```
+
+### 6. Validate Redirect URIs
+
+```java
+// Whitelist exact URIs
+@Value("${keycloak.redirect-uri}")
+private String redirectUri; // Must match Keycloak config
+```
+
+### 7. Use SameSite Cookies
+
+```java
+cookie.setSameSite("Strict"); // or "Lax"
+```
+
+### 8. Implement Logout
+
+```java
+@PostMapping("/api/logout")
+public ResponseEntity<?> logout(HttpServletResponse response) {
+    // Clear refresh token cookie
+    Cookie cookie = new Cookie("refresh_token", null);
+    cookie.setMaxAge(0);
+    cookie.setPath("/");
+    response.addCookie(cookie);
+    
+    // Optionally revoke token at Keycloak
+    // ...
+    
+    return ResponseEntity.ok().build();
+}
+```
+
+### 9. Monitor for Token Theft
+
+```java
+// Log all token usage
+@Component
+public class TokenAuditFilter extends OncePerRequestFilter {
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, 
+                                   HttpServletResponse response, 
+                                   FilterChain filterChain) {
+        // Log IP, user-agent, timestamp
+        // Alert on suspicious patterns (multiple IPs, locations)
+    }
+}
+```
+
+### 10. Rate Limiting
+
+```java
+@Bean
+public RateLimiter rateLimiter() {
+    return RateLimiter.create(10.0); // 10 requests per second
+}
+```
+
+---
+
+## Summary
+
+### MITM Protection Checklist
+
+✅ **Mandatory:**
+- HTTPS/TLS for all communication
+- Valid SSL certificates
+- State parameter (CSRF protection)
+- Strict redirect URI validation
+- Short token lifetimes
+
+✅ **Highly Recommended:**
+- PKCE implementation
+- Token refresh mechanism
+- SameSite cookies
+- Content Security Policy
+
+✅ **Advanced:**
+- Certificate pinning
+- Token binding
+- Anomaly detection
+
+### Cookie Alternatives
+
+**Use Cookies when:**
+- Building traditional web app
+- Want automatic token management
+- Need HttpOnly protection
+- Backend and frontend same domain
+
+**Use Authorization Header when:**
+- Building mobile app
+- Microservices architecture
+- Frontend and backend different domains
+- Need more control over token storage
+
+**Use Hybrid Approach when:**
+- Need best security
+- Want good UX
+- Can handle complexity
+- Building production app
+
+**The key to security isn't the storage method alone—it's the combination of HTTPS, PKCE, proper validation, and defense in depth.**
