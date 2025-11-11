@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG Q&A System - Web Interface</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h1>🤖 RAG Q&A System</h1>
+            <p>Ask questions about your documents using local AI models</p>
+        </header>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-item">
+                <span class="status-label">Status:</span>
+                <span id="systemStatus" class="status-value">Checking...</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Documents:</span>
+                <span id="documentCount" class="status-value">0</span>
+            </div>
+        </div>
+
+        <!-- Control Panel -->
+        <div class="control-panel">
+            <button id="loadDataBtn" class="btn btn-primary">📖 Load Sample Data</button>
+            <button id="clearBtn" class="btn btn-danger">🗑️ Clear Vector Store</button>
+            <button id="refreshBtn" class="btn btn-secondary">🔄 Refresh Status</button>
+        </div>
+
+        <!-- Chat Container -->
+        <div class="chat-container">
+            <div id="chatMessages" class="chat-messages">
+                <div class="message system-message">
+                    <div class="message-content">
+                        👋 Welcome! Load sample data or upload documents to get started.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Input Area -->
+            <div class="input-area">
+                <textarea 
+                    id="questionInput" 
+                    placeholder="Ask a question about your documents..."
+                    rows="3"
+                ></textarea>
+                <button id="sendBtn" class="btn btn-send">
+                    <span id="sendBtnText">Send</span>
+                    <span id="sendBtnLoader" class="loader" style="display: none;"></span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer>
+            <p>Powered by Ollama (LLaMA 2) + ChromaDB + Flask</p>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

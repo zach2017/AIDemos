@@ -1,0 +1,121 @@
+version: '3.8'
+
+services:
+  # Ollama - Local LLM Service
+  ollama:
+    image: ollama/ollama:latest
+    container_name: rag-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - rag-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    # Uncomment below if you have NVIDIA GPU
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # ChromaDB - Vector Database
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: rag-chromadb
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+    networks:
+      - rag-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Streamlit Application
+  streamlit-app:
+    build:
+      context: ./streamlit-app
+      dockerfile: Dockerfile
+    container_name: rag-streamlit
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+      - ./streamlit-app:/app
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      ollama:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+    networks:
+      - rag-network
+    command: streamlit run app.py --server.address=0.0.0.0
+
+  # Web Application (Flask + HTML/JS)
+  web-app:
+    build:
+      context: ./web-app
+      dockerfile: Dockerfile
+    container_name: rag-webapp
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/app/data
+      - ./web-app:/app
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - FLASK_ENV=development
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      ollama:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+    networks:
+      - rag-network
+    command: python server.py
+
+  # Initialization Service - Downloads Ollama model
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: rag-ollama-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks:
+      - rag-network
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Pulling llama2 model..."
+        ollama pull llama2 --base-url http://ollama:11434
+        echo "Model ready!"
+    restart: "no"
+
+networks:
+  rag-network:
+    driver: bridge
+
+volumes:
+  ollama_data:
+  chroma_data:
