@@ -43,7 +43,7 @@ public class SecurityConfig {
                     "/oauth2/callback",      
                     "/error"                   
                 ).permitAll()
-                .requestMatchers("**").authenticated()  // Only protect API endpoints
+                .requestMatchers("**").authenticated()  
                 .anyRequest().authenticated()
             )
             .oauth2ResourceServer(oauth2 -> oauth2
@@ -59,7 +59,7 @@ public class SecurityConfig {
     @Bean
     public AuthenticationEntryPoint keycloakAuthenticationEntryPoint() {
         return (request, response, authException) -> {
-            // Only redirect to Keycloak for API calls, not static resources
+           
             if (request.getRequestURI().startsWith("/api")) {
                 String authorizationUrl = String.format(
                     "%s/realms/%s/protocol/openid-connect/auth?client_id=%s&redirect_uri=%s&response_type=code&scope=openid",
