@@ -1,7 +1,8 @@
 import streamlit as st
 import os
 import time
-from utils.document_loader import DocumentLoader
+
+from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from utils.vectorstore import VectorStoreManager
 from utils.rag_chain import RAGChain
 
