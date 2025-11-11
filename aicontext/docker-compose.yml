@@ -35,7 +35,7 @@ services:
       - localstack
     environment:
       # These URLs use the Docker service names
-      - KEYCLOAK_URL=http://keycloak:8080
+      - KEYCLOAK_URL=http://localhost:8180
       - LOCALSTACK_URL=http://localstack:4566
     networks:
       - app-net

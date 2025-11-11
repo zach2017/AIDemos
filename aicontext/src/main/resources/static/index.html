@@ -14,18 +14,6 @@
     <div class="container mx-auto p-8 max-w-2xl">
         <h1 class="text-3xl font-bold text-gray-800 mb-6">Secure Document Upload</h1>
 
-        <div class="bg-white p-4 rounded-lg shadow-md mb-6 flex justify-between items-center">
-            <span id="username" class="text-gray-700">Not logged in.</span>
-            <div>
-                <button id="login-btn" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
-                    Login
-                </button>
-                <button id="logout-btn" class="hidden bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">
-                    Logout
-                </button>
-            </div>
-        </div>
-
         <div id="upload-section" class="hidden bg-white p-6 rounded-lg shadow-md mb-6">
             <h2 class="text-xl font-semibold mb-4">Upload Documents</h2>
             <form id="upload-form">
@@ -46,15 +34,7 @@
     </div>
 
     <script>
-        // --- Keycloak Configuration ---
-        const keycloak = new Keycloak({
-            url: "http://localhost:8180",
-            realm: "spring-demo",
-            clientId: "spring-client"
-        });
-
-        const loginBtn = document.getElementById('login-btn');
-        const logoutBtn = document.getElementById('logout-btn');
+     
         const usernameEl = document.getElementById('username');
         const uploadSection = document.getElementById('upload-section');
         const uploadForm = document.getElementById('upload-form');
@@ -63,43 +43,9 @@
         
         let stompClient = null;
 
-        // --- 1. Keycloak Initialization ---
-        keycloak.init({ onLoad: 'check-sso' })
-            .then(authenticated => {
-                if (authenticated) {
-                    console.log('User is authenticated');
-                    setupAuthenticatedState(keycloak.tokenParsed);
-                    connectWebSocket();
-                } else {
-                    console.log('User is not authenticated');
-                    setupGuestState();
-                }
-            })
-            .catch(err => console.error('Keycloak init failed', err));
-
-        // --- 2. Auth State UI ---
-        function setupAuthenticatedState(profile) {
-            loginBtn.classList.add('hidden');
-            logoutBtn.classList.remove('hidden');
-            uploadSection.classList.remove('hidden');
-            usernameEl.textContent = `Logged in as: ${profile.preferred_username}`;
-            statusList.innerHTML = ''; // Clear "Waiting for uploads"
-        }
-
-        function setupGuestState() {
-            loginBtn.classList.remove('hidden');
-            logoutBtn.classList.add('hidden');
-            uploadSection.classList.add('hidden');
-            usernameEl.textContent = 'Not logged in.';
-            statusList.innerHTML = '<li class="text-gray-400">Please log in to see status.</li>';
-        }
-
-        loginBtn.onclick = () => keycloak.login();
-        logoutBtn.onclick = () => keycloak.logout();
-
+    
         // --- 3. WebSocket Connection ---
         function connectWebSocket() {
-            if (!keycloak.authenticated) return;
 
             const socket = new SockJS('/ws');
             stompClient = Stomp.over(socket);
@@ -148,8 +94,7 @@
             }
 
             try {
-                // Ensure token is fresh
-                await keycloak.updateToken(30);
+        
 
                 const formData = new FormData();
                 for (const file of fileInput.files) {
@@ -159,7 +104,6 @@
                 // Use Axios to send multipart form data
                 const response = await axios.post('/api/upload', formData, {
                     headers: {
-                        'Authorization': `Bearer ${keycloak.token}`,
                         'Content-Type': 'multipart/form-data'
                     }
                 });
