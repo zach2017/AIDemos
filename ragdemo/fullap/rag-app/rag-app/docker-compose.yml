@@ -11,6 +11,10 @@ services:
       - ollama_data:/root/.ollama
     networks:
       - rag-network
+    environment:
+      - OLLAMA_KEEP_ALIVE=300
+      - OLLAMA_MODELS_DIR=/root/.ollama
+      - OLLAMA_NO_GPU=true
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:11434"]
       interval: 30s
@@ -102,6 +106,10 @@ services:
     depends_on:
       ollama:
         condition: service_healthy
+    environment:
+      - OLLAMA_KEEP_ALIVE=300
+      - OLLAMA_MODELS_DIR=/root/.ollama
+      - OLLAMA_NO_GPU=true
     networks:
       - rag-network
     entrypoint: ["/bin/sh", "-c"]
