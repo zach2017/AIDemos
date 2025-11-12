@@ -2,6 +2,7 @@
 
 A modern web interface for building vector embeddings from text documents, storing them in a Chroma database, and querying them with optional RAG (Retrieval-Augmented Generation) using Ollama.
 
+
 ## Features
 
 - 📤 **Drag & Drop Upload** - Easy file upload with drag-and-drop support
