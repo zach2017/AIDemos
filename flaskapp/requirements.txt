@@ -1,0 +1,10 @@
+Flask
+langchain-chroma
+langchain-huggingface
+langchain-text-splitters
+langchain-core
+langchain-ollama
+sentence-transformers
+chromadb
+Werkzeug
+requests

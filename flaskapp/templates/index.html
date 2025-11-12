@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Embeddings & Query System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .file-upload-area {
+            transition: all 0.3s ease;
+        }
+        .file-upload-area.drag-over {
+            background-color: #e0e7ff;
+            border-color: #6366f1;
+        }
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #6366f1;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .tab-active {
+            border-bottom: 2px solid #6366f1;
+            color: #6366f1;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 to-slate-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-6xl">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-slate-800 mb-2">📚 Document Embeddings & Query System</h1>
+            <p class="text-slate-600">Build vector databases and query them with semantic search</p>
+        </div>
+
+        <!-- Tabs -->
+        <div class="bg-white rounded-lg shadow-lg mb-6">
+            <div class="flex border-b">
+                <button id="ingestTab" class="flex-1 py-4 px-6 font-semibold text-slate-700 hover:bg-slate-50 transition tab-active" onclick="switchTab('ingest')">
+                    📤 Ingest Documents
+                </button>
+                <button id="queryTab" class="flex-1 py-4 px-6 font-semibold text-slate-700 hover:bg-slate-50 transition" onclick="switchTab('query')">
+                    🔍 Query Database
+                </button>
+            </div>
+        </div>
+
+        <!-- Ingest Section -->
+        <div id="ingestSection" class="bg-white rounded-lg shadow-lg p-8">
+            <form id="uploadForm" enctype="multipart/form-data">
+                
+                <!-- File Upload Area -->
+                <div class="mb-6">
+                    <label class="block text-sm font-semibold text-slate-700 mb-2">
+                        📄 Upload Documents
+                    </label>
+                    <div id="dropZone" class="file-upload-area border-2 border-dashed border-slate-300 rounded-lg p-8 text-center cursor-pointer hover:bg-slate-50">
+                        <input type="file" id="fileInput" name="files[]" multiple accept=".txt,.md,.csv,.json,.log,.py,.js,.html,.css" class="hidden">
+                        <div id="uploadPrompt">
+                            <svg class="mx-auto h-12 w-12 text-slate-400 mb-3" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                                <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                            </svg>
+                            <p class="text-slate-600 font-medium mb-1">Click to upload or drag and drop</p>
+                            <p class="text-slate-500 text-sm">TXT, MD, CSV, JSON, LOG, PY, JS, HTML, CSS</p>
+                        </div>
+                        <div id="fileList" class="hidden mt-4 text-left"></div>
+                    </div>
+                </div>
+
+                <!-- Configuration Options -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div>
+                        <label for="persist_dir" class="block text-sm font-semibold text-slate-700 mb-2">
+                            💾 Database Directory
+                        </label>
+                        <input type="text" id="persist_dir" name="persist_dir" value="./chroma_db"
+                               class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
+                    </div>
+
+                    <div>
+                        <label for="collection_name" class="block text-sm font-semibold text-slate-700 mb-2">
+                            🗂️ Collection Name
+                        </label>
+                        <input type="text" id="collection_name" name="collection_name" value="demo"
+                               class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
+                    </div>
+
+                    <div>
+                        <label for="chunk_size" class="block text-sm font-semibold text-slate-700 mb-2">
+                            📏 Chunk Size
+                        </label>
+                        <input type="number" id="chunk_size" name="chunk_size" value="800" min="100" max="5000"
+                               class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
+                    </div>
+
+                    <div>
+                        <label for="chunk_overlap" class="block text-sm font-semibold text-slate-700 mb-2">
+                            🔗 Chunk Overlap
+                        </label>
+                        <input type="number" id="chunk_overlap" name="chunk_overlap" value="120" min="0" max="500"
+                               class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
+                    </div>
+                </div>
+
+                <div class="mb-6">
+                    <label class="flex items-center space-x-2 cursor-pointer">
+                        <input type="checkbox" id="reset" name="reset" class="w-5 h-5 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500">
+                        <span class="text-sm font-medium text-slate-700">🔄 Reset database</span>
+                    </label>
+                </div>
+
+                <button type="submit" id="submitBtn"
+                        class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-lg transition">
+                    Build Embeddings
+                </button>
+
+                <div id="processingState" class="hidden mt-4 flex items-center justify-center space-x-3 text-indigo-600">
+                    <div class="spinner"></div>
+                    <span class="font-medium">Processing...</span>
+                </div>
+            </form>
+            <div id="resultArea" class="hidden mt-6"></div>
+        </div>
+
+        <!-- Query Section -->
+        <div id="querySection" class="hidden bg-white rounded-lg shadow-lg p-8">
+            <form id="queryForm">
+                <div class="mb-6">
+                    <label for="query_text" class="block text-sm font-semibold text-slate-700 mb-2">
+                        💬 Your Query
+                    </label>
+                    <textarea id="query_text" rows="3" placeholder="What would you like to know?"
+                              class="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none resize-none"></textarea>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div>
+                        <label for="query_persist_dir" class="block text-sm font-semibold text-slate-700 mb-2">
+                            💾 Database Directory
+                        </label>
+                        <input type="text" id="query_persist_dir" value="./chroma_db"
+                               class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                    </div>
+
+                    <div>
+                        <label for="query_collection_name" class="block text-sm font-semibold text-slate-700 mb-2">
+                            🗂️ Collection Name
+                        </label>
+                        <input type="text" id="query_collection_name" value="demo"
+                               class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                    </div>
+
+                    <div>
+                        <label for="top_k" class="block text-sm font-semibold text-slate-700 mb-2">
+                            🔢 Top K Results
+                        </label>
+                        <input type="number" id="top_k" value="4" min="1" max="20"
+                               class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                    </div>
+
+                    <div>
+                        <label for="ollama_model" class="block text-sm font-semibold text-slate-700 mb-2">
+                            🤖 Ollama Model
+                        </label>
+                        <input type="text" id="ollama_model" placeholder="llama2, mistral, etc."
+                               class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                    </div>
+                </div>
+
+                <div class="mb-6">
+                    <label class="flex items-center space-x-2 cursor-pointer">
+                        <input type="checkbox" id="use_ollama" class="w-5 h-5 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500">
+                        <span class="text-sm font-medium text-slate-700">🧠 Use Ollama for RAG</span>
+                    </label>
+                </div>
+
+                <button type="submit" id="queryBtn"
+                        class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-lg transition">
+                    🔍 Search
+                </button>
+
+                <div id="queryProcessingState" class="hidden mt-4 flex items-center justify-center space-x-3 text-indigo-600">
+                    <div class="spinner"></div>
+                    <span class="font-medium">Searching...</span>
+                </div>
+            </form>
+            <div id="queryResultArea" class="hidden mt-6"></div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
