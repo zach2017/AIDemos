@@ -7,4 +7,6 @@ python query.py --persist ./chroma_db --collection demo --query "Summarize the p
 doskey /history > didthis.txt
 
 
+python queryCloud.py  --collection demo --query "Food good for iron" --ollama tinyllama
+
 Result: 
