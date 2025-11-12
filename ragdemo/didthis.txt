@@ -1,7 +1,7 @@
 
 pip install -r requirements.txt  
 
-python ingest.py --persist ./chroma_db --collection demo --files docs/policy.txt docs/notes.txt
+python ingest.py --persist ./chroma_db --collection demo --files docs/policy.txt docs/notes.txt docs/doc1.txt
 
 python query.py --persist ./chroma_db --collection demo --query "Summarize the policy" --ollama tinyllama
 doskey /history > didthis.txt
