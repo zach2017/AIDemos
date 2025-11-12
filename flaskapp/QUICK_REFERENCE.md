@@ -27,7 +27,7 @@ python app.py
 docker exec -it ollama_service ollama pull phi
 
 # Balanced quality
-docker exec -it ollama_service ollama pull llama2
+docker exec -it ollama_service ollama pull nomic-embed-text
 docker exec -it ollama_service ollama pull mistral
 
 # High quality (large)
