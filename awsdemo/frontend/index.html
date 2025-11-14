@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Uploader</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+
+    <div class="container mx-auto max-w-2xl p-8 my-10 bg-white rounded-lg shadow-md">
+        <h1 class="text-3xl font-bold mb-6 text-gray-800">Upload Documents</h1>
+        
+        <form id="upload-form">
+            <div class="mb-4">
+                <label for="metadata" class="block text-sm font-medium text-gray-700 mb-2">Metadata (JSON String)</label>
+                <textarea id="metadata" rows="4" class="w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500" placeholder='{"project": "localstack-demo", "author": "user"}'></textarea>
+            </div>
+
+            <div class="mb-6">
+                <label for="files" class="block text-sm font-medium text-gray-700 mb-2">Choose Files</label>
+                <input type="file" id="files" multiple class="w-full text-sm text-gray-500
+                    file:mr-4 file:py-2 file:px-4
+                    file:rounded-md file:border-0
+                    file:text-sm file:font-semibold
+                    file:bg-blue-50 file:text-blue-700
+                    hover:file:bg-blue-100" />
+            </div>
+
+            <button type="submit" id="submit-btn" class="w-full bg-blue-600 text-white py-2 px-4 rounded-md font-semibold hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                Upload
+            </button>
+        </form>
+
+        <div id="status" class="mt-6 space-y-2">
+            </div>
+    </div>
+
+    <script>
+        // !!! IMPORTANT !!!
+        // You MUST update this URL with the output from the 'docker-compose up' command.
+        const API_ENDPOINT = "PASTE_YOUR_API_GATEWAY_URL_HERE";
+
+        const form = document.getElementById('upload-form');
+        const filesInput = document.getElementById('files');
+        const metadataInput = document.getElementById('metadata');
+        const statusDiv = document.getElementById('status');
+        const submitBtn = document.getElementById('submit-btn');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Uploading...';
+            statusDiv.innerHTML = '';
+
+            if (API_ENDPOINT === "PASTE_YOUR_API_GATEWAY_URL_HERE") {
+                addStatus("ERROR: API_ENDPOINT is not set in index.html.", "error");
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Upload';
+                return;
+            }
+
+            const files = filesInput.files;
+            if (files.length === 0) {
+                addStatus("Please select at least one file.", "error");
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Upload';
+                return;
+            }
+
+            for (const file of files) {
+                try {
+                    const base64File = await toBase64(file);
+                    const payload = {
+                        file_name: file.name,
+                        file_data: base64File, // Send only the Base64 part
+                        metadata: metadataInput.value || '{}'
+                    };
+
+                    addStatus(`Uploading ${file.name}...`, "pending");
+                    const response = await fetch(API_ENDPOINT, {
+                        method: 'POST',
+                        body: JSON.stringify(payload),
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+
+                    const result = await response.json();
+
+                    if (!response.ok) {
+                        throw new Error(result.message || `HTTP error! Status: ${response.status}`);
+                    }
+                    
+                    addStatus(`Success: ${file.name} uploaded. Document ID: ${result.document_id}`, "success");
+
+                } catch (error) {
+                    addStatus(`Error uploading ${file.name}: ${error.message}`, "error");
+                }
+            }
+            
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Upload';
+        });
+
+        function toBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => resolve(reader.result.split(',')[1]); // Get only the Base64 data
+                reader.onerror = error => reject(error);
+            });
+        }
+
+        function addStatus(message, type) {
+            let colorClass = '';
+            if (type === 'success') colorClass = 'text-green-600';
+            if (type === 'error') colorClass = 'text-red-600';
+            if (type === 'pending') colorClass = 'text-gray-600';
+            statusDiv.innerHTML += `<p class="p-2 rounded-md ${type === 'pending' ? 'animate-pulse' : ''} ${colorClass}">${message}</p>`;
+        }
+    </script>
+</body>
+</html>

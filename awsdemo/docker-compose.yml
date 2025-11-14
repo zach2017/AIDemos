@@ -1,0 +1,46 @@
+version: "3.8"
+
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - init-aws
+    restart: on-failure
+
+  localstack:
+    image: localstack/localstack:3.0
+    ports:
+      - "4566:4566"
+      - "4510-4559:4510-4559"
+    environment:
+      - SERVICES=s3,sqs,lambda,apigateway
+      - DEBUG=0
+      - DEFAULT_REGION=us-east-1
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "localstack_data:/var/lib/localstack"
+
+  init-aws:
+    # --- MODIFICATIONS START ---
+    # We now build a custom image instead of pulling a pre-made one
+    build:
+      context: . # Use the project root as the build context
+      dockerfile: ./init-aws/Dockerfile # Point to the new Dockerfile
+    # --- MODIFICATIONS END ---
+    depends_on:
+      - localstack
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ENDPOINT_URL=http://localstack:4566
+    # --- MODIFICATION ---
+    # We removed the 'volumes:' key entirely
+    entrypoint: /bin/bash
+    command: /scripts/init.sh # This still works because the Dockerfile copied the script here
+
+volumes:
+  localstack_data: {}
